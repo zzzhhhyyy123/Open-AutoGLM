@@ -1,7 +1,6 @@
 """Action handler for processing AI model outputs."""
 
 import ast
-import re
 import subprocess
 import time
 from dataclasses import dataclass
@@ -104,6 +103,7 @@ class ActionHandler:
             "Note": self._handle_note,
             "Call_API": self._handle_call_api,
             "Interact": self._handle_interact,
+            "KeyEvent": self._handle_keyevent,
         }
         return handlers.get(action_name)
 
@@ -169,6 +169,11 @@ class ActionHandler:
         # Restore original keyboard
         device_factory.restore_keyboard(original_ime, self.device_id)
         time.sleep(TIMING_CONFIG.action.keyboard_restore_delay)
+
+        # Submit input by pressing Enter if requested (e.g. from new-format type with \n)
+        if action.get("submit"):
+            self._send_keyevent("66")
+            time.sleep(TIMING_CONFIG.action.text_input_delay)
 
         return ActionResult(True, False)
 
@@ -236,6 +241,14 @@ class ActionHandler:
         """Handle takeover request (login, captcha, etc.)."""
         message = action.get("message", "User intervention required")
         self.takeover_callback(message)
+        return ActionResult(True, False)
+
+    def _handle_keyevent(self, action: dict, width: int, height: int) -> ActionResult:
+        """Handle sending an Android/HarmonyOS key event."""
+        keycode = action.get("keycode")
+        if not keycode:
+            return ActionResult(False, False, "No keycode specified")
+        self._send_keyevent(str(keycode))
         return ActionResult(True, False)
 
     def _handle_note(self, action: dict, width: int, height: int) -> ActionResult:
@@ -333,6 +346,11 @@ def parse_action(response: str) -> dict[str, Any]:
     """
     Parse action from model response.
 
+    Supports both the original AutoGLM ``do(...)``/``finish(...)`` format and
+    the alternative UI-TARS style format (``click(...)``, ``scroll(...)``, etc.).
+    The new format is automatically detected and converted to the internal dict
+    representation via :mod:`phone_agent.actions.adapter`.
+
     Args:
         response: Raw response string from the model.
 
@@ -342,9 +360,17 @@ def parse_action(response: str) -> dict[str, Any]:
     Raises:
         ValueError: If the response cannot be parsed.
     """
+    from phone_agent.actions.adapter import convert, is_new_format
+
     print(f"Parsing action: {response}")
     try:
         response = response.strip()
+
+        # --- New model format detection & conversion ---
+        if is_new_format(response):
+            return convert(response)
+
+        # --- Original AutoGLM format ---
         if response.startswith('do(action="Type"') or response.startswith(
             'do(action="Type_Name"'
         ):
