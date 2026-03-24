@@ -39,6 +39,9 @@ _BOX_PATTERN = re.compile(
     r"<\|box_start\|>\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)\s*<\|box_end\|>"
 )
 
+# Fallback regex for bare (x,y) coordinates without box markers
+_BARE_COORD_PATTERN = re.compile(r"\(\s*(\d+)\s*,\s*(\d+)\s*\)")
+
 # Default scroll distance in the 0-999 coordinate space (~30% of screen)
 _SCROLL_DISTANCE = 300
 
@@ -60,11 +63,18 @@ def is_new_format(action_str: str) -> bool:
 
 
 def _extract_box_coords(box_str: str) -> list[int]:
-    """Extract [x, y] from a ``<|box_start|>(x,y)<|box_end|>`` string."""
+    """Extract [x, y] from a coordinate string.
+
+    Supports both the full marker format ``<|box_start|>(x,y)<|box_end|>``
+    and the bare format ``(x,y)`` that some models produce.
+    """
     m = _BOX_PATTERN.search(box_str)
-    if not m:
-        raise ValueError(f"Cannot extract coordinates from: {box_str}")
-    return [int(m.group(1)), int(m.group(2))]
+    if m:
+        return [int(m.group(1)), int(m.group(2))]
+    m = _BARE_COORD_PATTERN.search(box_str)
+    if m:
+        return [int(m.group(1)), int(m.group(2))]
+    raise ValueError(f"Cannot extract coordinates from: {box_str}")
 
 
 def _extract_kwarg(action_str: str, key: str) -> str | None:

@@ -397,6 +397,15 @@ def parse_action(response: str) -> dict[str, Any]:
                     value = ast.literal_eval(keyword.value)
                     action[key] = value
 
+                # Handle positional arguments: e.g. do(Launch, app='...')
+                # The first positional arg is treated as the action name.
+                if "action" not in action and call.args:
+                    first_arg = call.args[0]
+                    if isinstance(first_arg, ast.Name):
+                        action["action"] = first_arg.id
+                    elif isinstance(first_arg, ast.Constant):
+                        action["action"] = str(first_arg.value)
+
                 return action
             except (SyntaxError, ValueError) as e:
                 raise ValueError(f"Failed to parse do() action: {e}")
