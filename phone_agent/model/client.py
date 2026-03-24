@@ -81,7 +81,21 @@ class ModelClient:
 
         raw_content = ""
         buffer = ""  # Buffer to hold content that might be part of a marker
-        action_markers = ["finish(message=", "do(action="]
+        # Markers for both AutoGLM and new UI-TARS style formats
+        action_markers = [
+            "finish(message=",
+            "do(action=",
+            "click(",
+            "left_double(",
+            "right_single(",
+            "drag(",
+            "hotkey(",
+            "type(",
+            "scroll(",
+            "wait()",
+            "finished()",
+            "call_user()",
+        ]
         in_action_phase = False  # Track if we've entered the action phase
         first_token_received = False
 
@@ -182,8 +196,9 @@ class ModelClient:
            everything from 'finish(message=' onwards is action.
         2. If rule 1 doesn't apply but content contains 'do(action=',
            everything before is thinking, everything from 'do(action=' onwards is action.
-        3. Fallback: If content contains '<answer>', use legacy parsing with XML tags.
-        4. Otherwise, return empty thinking and full content as action.
+        3. Check for new UI-TARS style action markers (click, scroll, type, etc.).
+        4. Fallback: If content contains '<answer>', use legacy parsing with XML tags.
+        5. Otherwise, return empty thinking and full content as action.
 
         Args:
             content: Raw response content.
@@ -205,14 +220,32 @@ class ModelClient:
             action = "do(action=" + parts[1]
             return thinking, action
 
-        # Rule 3: Fallback to legacy XML tag parsing
+        # Rule 3: Check for new-format action markers
+        from phone_agent.actions.adapter import NEW_FORMAT_ACTIONS
+
+        for action_name in NEW_FORMAT_ACTIONS:
+            marker = action_name + "("
+            if marker in content:
+                parts = content.split(marker, 1)
+                thinking = (
+                    parts[0]
+                    .replace("<think>", "")
+                    .replace("</think>", "")
+                    .strip()
+                )
+                action = marker + parts[1]
+                # Strip trailing closing tags if present
+                action = action.replace("</answer>", "").strip()
+                return thinking, action
+
+        # Rule 4: Fallback to legacy XML tag parsing
         if "<answer>" in content:
             parts = content.split("<answer>", 1)
             thinking = parts[0].replace("<think>", "").replace("</think>", "").strip()
             action = parts[1].replace("</answer>", "").strip()
             return thinking, action
 
-        # Rule 4: No markers found, return content as action
+        # Rule 5: No markers found, return content as action
         return "", content
 
 
