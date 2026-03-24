@@ -481,3 +481,123 @@ class TestModelClientParseResponse:
         content = "Press back.\nhotkey(key='Escape')"
         thinking, action = self._parse(content)
         assert action.startswith("hotkey(")
+
+    def test_do_positional_arg_detected(self):
+        content = "<answer>\ndo(Launch, app='华为坤灵')"
+        thinking, action = self._parse(content)
+        assert action.startswith("do(")
+
+    def test_do_positional_without_answer_tag(self):
+        content = "需要启动应用\ndo(Launch, app='华为坤灵')"
+        thinking, action = self._parse(content)
+        assert action == "do(Launch, app='华为坤灵')"
+
+
+# ---------------------------------------------------------------------------
+# Real-world regression: bare coordinates and positional args
+# ---------------------------------------------------------------------------
+class TestRealWorldRegressions:
+    """Tests based on actual model outputs that previously failed."""
+
+    def test_click_bare_coords(self):
+        """click(start_box='(736,169)') — no <|box_start|> markers."""
+        result = convert("click(start_box='(736,169)')")
+        assert result == {"_metadata": "do", "action": "Tap", "element": [736, 169]}
+
+    def test_click_bare_coords_with_spaces(self):
+        result = convert("click(start_box='( 500 , 300 )')")
+        assert result == {"_metadata": "do", "action": "Tap", "element": [500, 300]}
+
+    def test_left_double_bare_coords(self):
+        result = convert("left_double(start_box='(100,200)')")
+        assert result == {
+            "_metadata": "do",
+            "action": "Double Tap",
+            "element": [100, 200],
+        }
+
+    def test_right_single_bare_coords(self):
+        result = convert("right_single(start_box='(300,400)')")
+        assert result == {
+            "_metadata": "do",
+            "action": "Long Press",
+            "element": [300, 400],
+        }
+
+    def test_scroll_bare_coords(self):
+        result = convert("scroll(start_box='(500,500)', direction='down')")
+        assert result["action"] == "Swipe"
+        assert result["start"] == [500, 800]
+        assert result["end"] == [500, 200]
+
+    def test_drag_bare_coords(self):
+        result = convert(
+            "drag(start_box='(100,200)', end_box='(300,400)')"
+        )
+        assert result == {
+            "_metadata": "do",
+            "action": "Swipe",
+            "start": [100, 200],
+            "end": [300, 400],
+        }
+
+    def test_do_positional_launch(self):
+        """do(Launch, app='华为坤灵') — Launch as positional arg, not action=."""
+        from phone_agent.actions.handler import parse_action
+
+        result = parse_action("do(Launch, app='华为坤灵')")
+        assert result["_metadata"] == "do"
+        assert result["action"] == "Launch"
+        assert result["app"] == "华为坤灵"
+
+    def test_do_positional_tap(self):
+        """do(Tap, element=[500, 300]) — positional action name."""
+        from phone_agent.actions.handler import parse_action
+
+        result = parse_action("do(Tap, element=[500, 300])")
+        assert result["action"] == "Tap"
+        assert result["element"] == [500, 300]
+
+    def test_do_positional_back(self):
+        """do(Back) — single positional arg."""
+        from phone_agent.actions.handler import parse_action
+
+        result = parse_action("do(Back)")
+        assert result["action"] == "Back"
+
+    def test_click_bare_through_parse_action(self):
+        """Full path: parse_action -> adapter for bare-coords click."""
+        from phone_agent.actions.handler import parse_action
+
+        result = parse_action("click(start_box='(736,169)')")
+        assert result == {"_metadata": "do", "action": "Tap", "element": [736, 169]}
+
+    def test_parse_response_then_parse_action_click_bare(self):
+        """Full pipeline: _parse_response splits, then parse_action converts."""
+        from phone_agent.actions.handler import parse_action
+        from phone_agent.model.client import ModelClient
+
+        client = ModelClient.__new__(ModelClient)
+        content = (
+            "<think>在桌面上找到华为坤灵图标\n"
+            "Action: click(start_box='(736,169)')"
+        )
+        thinking, action_str = client._parse_response(content)
+        assert action_str.startswith("click(")
+
+        result = parse_action(action_str)
+        assert result == {"_metadata": "do", "action": "Tap", "element": [736, 169]}
+
+    def test_parse_response_then_parse_action_do_positional(self):
+        """Full pipeline: do(Launch, app='华为坤灵') through both stages."""
+        from phone_agent.actions.handler import parse_action
+        from phone_agent.model.client import ModelClient
+
+        client = ModelClient.__new__(ModelClient)
+        content = "<answer>\ndo(Launch, app='华为坤灵')"
+        thinking, action_str = client._parse_response(content)
+        assert "do(" in action_str
+
+        result = parse_action(action_str)
+        assert result["action"] == "Launch"
+        assert result["app"] == "华为坤灵"

@@ -85,6 +85,7 @@ class ModelClient:
         action_markers = [
             "finish(message=",
             "do(action=",
+            "do(",
             "click(",
             "left_double(",
             "right_single(",
@@ -213,11 +214,16 @@ class ModelClient:
             action = "finish(message=" + parts[1]
             return thinking, action
 
-        # Rule 2: Check for do(action=
+        # Rule 2: Check for do(action= or do( with positional args like do(Launch, ...)
         if "do(action=" in content:
             parts = content.split("do(action=", 1)
             thinking = parts[0].strip()
             action = "do(action=" + parts[1]
+            return thinking, action
+        if "do(" in content:
+            parts = content.split("do(", 1)
+            thinking = parts[0].strip()
+            action = "do(" + parts[1]
             return thinking, action
 
         # Rule 3: Check for new-format action markers
